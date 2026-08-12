@@ -2,4 +2,7 @@
 .venv*
 .venv*/*
 *pycache*
-*.dir
+*.old
+chroma_db
+chroma_db/*
+
