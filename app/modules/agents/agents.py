@@ -6,6 +6,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_classic.memory import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_classic.output_parsers import OutputFixingParser
 
 class Agent:
 
@@ -50,9 +51,9 @@ class Agent:
             ("system", "You ran out of steps. Synthesize the best possible final answer for the user based on the partial work completed below.\n {sys_msg}"),
             ("user", "Original request: {input}\n\nActions and observations taken so far:\n{history}")
         ])
-        self.JsonParser = JsonOutputParser()
+        self.Parser = OutputFixingParser.from_llm(parser=JsonOutputParser(), llm=self.llm)
 
-        self.fallback_chain = summary_prompt | self.llm | self.JsonParser
+        self.fallback_chain = summary_prompt | self.llm | self.Parser
 
         self.session = None
 
@@ -67,7 +68,7 @@ class Agent:
             * Exit
             
             ## Output parameter (Optional)
-            Your **Output** to the advisor or the user.
+            Your **Output** to the advisor.
 
             ## Returns
             This tool will return The **output** of the selected advisor.
@@ -78,19 +79,19 @@ class Agent:
 
             ## Examples
             Example 1 Input:
-            - {'advisor':'Info'}
+            - {"advisor":"Info"}
 
             Example 1 Output:
             - {"Info Advisor": "Hello! How can I help you today?"}
 
             Example 2 Input:
-            - {'advisor':'Schedule', 'output': 'The user wants to schedule an interview in 2024-09-02'}
+            - {"advisor":"Schedule", "output": "The user wants to schedule an interview in 2024-09-02"}
 
             Example 2 Output:
             - {"Schedule Advisor": "Certainly, I can help you with that. Here are the available Time slots available for 2024-09-02... "}
 
             Example 3 Input:
-            - {'advisor':'Exit', 'output': "The user started talking about his troubles in life, should we end the conversation?"}
+            - {"advisor":"Exit", "output": "The user started talking about his troubles in life, should we end the conversation?"}
 
             Example 3 Output:
             - {"Exit Advisor": "Sounds like the user is not interested in applying to the position anymore. You can end the conversation as follows..."}
@@ -104,7 +105,7 @@ class Agent:
                     # Retrieve full history from memory
                 full_history = self.get_from_store(self.session).messages
                 # log the intention of the main agent in each step
-                self.get_from_store(self.session, hist=False).append('continue' if advisor.lower() == 'info' else advisor.lower())
+                self.get_from_store(self.session, hist=False).append(advisor.lower())
                 session_history = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in full_history])
                 # return advisor's output instead of just indication
                 advisor_result = self.advisors[advisor.lower()].invoke({"history": session_history, "input": output})
@@ -126,7 +127,7 @@ class Agent:
                         "history": history_summary
                     })
                     
-                    advisor_output = generated_response.content
+                    advisor_output = generated_response
                     
                 return {f'{advisor} Advisor': advisor_output}
             except KeyError:
@@ -160,13 +161,13 @@ class Agent:
             ])
 
             generated_response = self.fallback_chain.invoke({
-                "sys_msg": "Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, exit ):\n{{'intention': [Insert your intention regarding your response], 'response': [Insert your response]}}",
+                "sys_msg": 'Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, end ):\n{{"intention": "[Insert your intention regarding your response]", "response": "[Insert your response]"}}',
                 "input": user_input,
                 "history": history_summary
             })
             
-            return generated_response.content
-        return self.JsonParser.parse(agent_output)
+            return generated_response
+        return self.Parser.parse(agent_output)
 
     # retreive session history or logges
     def get_from_store(self,session_id, hist=True):
@@ -264,7 +265,7 @@ if __name__ == '__main__':
         api_key="ollama",
         model="gemma4:e4b", 
         base_url="http://localhost:11434/v1",
-        system_message="The User's application has been received successfully. The User will be redirected to you.\n"+"Output exactly this message to the user **at the start of the conversation** Ignoring the Advisor's output, and after that you can continue normally.",
+        system_message="The User's application has been received successfully. The User will be redirected to you.",
         sch_tools=[get_next_three_dates],
         info_tools=[load_info],
         temperature = 0,
