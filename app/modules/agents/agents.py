@@ -5,6 +5,7 @@ from langchain_classic.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_classic.memory import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.output_parsers import JsonOutputParser
 
 class Agent:
 
@@ -44,13 +45,14 @@ class Agent:
 
         }
 
-        # Create a fallback chain to use in case an agent ran out of steps.
+        # Create a fallback chain to use in case an agent ran out of steps. with optional addition to system message if needed
         summary_prompt = ChatPromptTemplate.from_messages([
-            ("system", "You ran out of steps. Synthesize the best possible final answer for the user based on the partial work completed below."),
+            ("system", "You ran out of steps. Synthesize the best possible final answer for the user based on the partial work completed below.\n {sys_msg}"),
             ("user", "Original request: {input}\n\nActions and observations taken so far:\n{history}")
         ])
+        self.JsonParser = JsonOutputParser()
 
-        self.fallback_chain = summary_prompt | self.llm
+        self.fallback_chain = summary_prompt | self.llm | self.JsonParser
 
         self.session = None
 
@@ -119,6 +121,7 @@ class Agent:
                     ])
 
                     generated_response = self.fallback_chain.invoke({
+                        "sys_msg": "",
                         "input": session_history + (f'\nMain Agent: {output}' if len(output)>0 else ''),
                         "history": history_summary
                     })
@@ -157,12 +160,13 @@ class Agent:
             ])
 
             generated_response = self.fallback_chain.invoke({
+                "sys_msg": "Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, exit ):\n{{'intention': [Insert your intention regarding your response], 'response': [Insert your response]}}",
                 "input": user_input,
                 "history": history_summary
             })
             
-            agent_output = generated_response.content
-        return agent_output    
+            return generated_response.content
+        return self.JsonParser.parse(agent_output)
 
     # retreive session history or logges
     def get_from_store(self,session_id, hist=True):
@@ -179,7 +183,7 @@ class Agent:
 
         # handle the system message for main agent only
         if has_history:
-            context += f'\n\n##Additional Info From The App\n{self.system_message}'
+            context += f'\n\n##Additional Info From The App:\n{self.system_message}'
 
         # Create the messages list
         messages = [
