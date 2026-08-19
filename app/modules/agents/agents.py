@@ -36,11 +36,12 @@ class Agent:
             temperature=temperature
         )
 
-        # Advisors store, the advisors are set to max iterations 3
+        # Advisors store, the advisors are set to max iterations 3, the advisors are set to max iterations 3
         self.advisors = {
             'info': self.build_agent(self.llm,f"agents_Instructions{path_sep}info_advisor.md", max_iterations=3, tools=info_tools),
             'schedule': self.build_agent(self.llm,f"agents_Instructions{path_sep}schedule_advisor.md", max_iterations=3, tools=sch_tools),
             'exit': self.build_agent(self.ft_llm, f"agents_Instructions{path_sep}exit_advisor.md", max_iterations=3)
+
         }
 
         # Create a fallback chain to use in case an agent ran out of steps.
@@ -69,6 +70,7 @@ class Agent:
             ## Returns
             This tool will return The **output** of the selected advisor.
             The output is structured as a dictionary.
+
             If the selected advisor does not match one of the above advisors,
             the tool will return an appropriate message.
 
@@ -97,7 +99,7 @@ class Agent:
                 if self.session is None:
                     raise Exception("Session Loading Failed")
 
-                # Retrieve full history from memory
+                    # Retrieve full history from memory
                 full_history = self.get_from_store(self.session).messages
                 # log the intention of the main agent in each step
                 self.get_from_store(self.session, hist=False).append('continue' if advisor.lower() == 'info' else advisor.lower())
@@ -161,8 +163,7 @@ class Agent:
             })
             
             agent_output = generated_response.content
-        return agent_output
-    
+        return agent_output    
 
     # retreive session history or logges
     def get_from_store(self,session_id, hist=True):
@@ -177,6 +178,9 @@ class Agent:
         with open(context_file) as f:
             context = f.read()
 
+        # handle the system message for main agent only
+        if has_history:
+            context += f'\n\n##Additional Info From The App\n{self.system_message}'
         # handle the system message for main agent only
         if has_history:
             context += f'\n\n##Additional Info From The App\n{self.system_message}'
