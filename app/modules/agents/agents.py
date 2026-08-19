@@ -143,7 +143,6 @@ class Agent:
         self.session = session_id
         # Main agent receives latest user message (memory auto-injects context)
         agent_result = self.main_agent.invoke({"input": user_input},config={"configurable": {"session_id": session_id}}) 
-
         agent_output = agent_result['output']
         agent_steps = agent_result['intermediate_steps']
         # if the agent stopped after max iterations conclude the steps and return a summary
@@ -178,9 +177,6 @@ class Agent:
         with open(context_file) as f:
             context = f.read()
 
-        # handle the system message for main agent only
-        if has_history:
-            context += f'\n\n##Additional Info From The App\n{self.system_message}'
         # handle the system message for main agent only
         if has_history:
             context += f'\n\n##Additional Info From The App\n{self.system_message}'
