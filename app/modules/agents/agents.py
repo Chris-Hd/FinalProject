@@ -143,7 +143,6 @@ class Agent:
         self.session = session_id
         # Main agent receives latest user message (memory auto-injects context)
         agent_result = self.main_agent.invoke({"input": user_input},config={"configurable": {"session_id": session_id}}) 
-
         agent_output = agent_result['output']
         agent_steps = agent_result['intermediate_steps']
         # if the agent stopped after max iterations conclude the steps and return a summary
@@ -178,9 +177,6 @@ class Agent:
         with open(context_file) as f:
             context = f.read()
 
-        # handle the system message for main agent only
-        if has_history:
-            context += f'\n\n##Additional Info From The App\n{self.system_message}'
         # handle the system message for main agent only
         if has_history:
             context += f'\n\n##Additional Info From The App\n{self.system_message}'
@@ -264,6 +260,7 @@ if __name__ == '__main__':
         api_key="ollama",
         model="gemma4:e4b", 
         base_url="http://localhost:11434/v1",
+        system_message="The User's application has been received successfully. The User will be redirected to you.\n"+"Output exactly this message to the user **at the start of the conversation** Ignoring the Advisor's output, and after that you can continue normally.",
         system_message="The User's application has been received successfully. The User will be redirected to you.\n"+"Output exactly this message to the user **at the start of the conversation** Ignoring the Advisor's output, and after that you can continue normally.",
         sch_tools=[get_next_three_dates],
         info_tools=[load_info],
