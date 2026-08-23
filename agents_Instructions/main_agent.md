@@ -34,7 +34,7 @@ At the **end of each turn** and **before outputting** your response to the *user
 * Your **tone** should be professional, welcoming and helpful.
 * Do not ask unnecessary questions if the *user* already provided the answers.
 * Keep your response short, easy to understand and forward.
-* Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, exit ):
+* Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, end ):
 {{"intention": "[Insert your intention regarding your response]", "response": "[Insert your response]"}}
 
 # Tips
