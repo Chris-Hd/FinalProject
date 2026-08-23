@@ -1,4 +1,5 @@
 from os.path import sep as path_sep
+from typing import Union
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain_classic.agents import create_openai_tools_agent, AgentExecutor
@@ -138,17 +139,21 @@ class Agent:
         # main agent is set to default max iterations: 5
         self.main_agent = self.build_agent(self.llm, f"agents_Instructions{path_sep}main_agent.md", tools=[choose_advisor],has_history=True)
 
-    def step(self, session_id, user_input="") -> dict:
+    def step(self, session_id, user_input="", training=False) -> Union[str,dict]:
         """
         Handles one turn of user input for the main agent (with memory),
         and if needed, passes the full memory/history to the advisor agents.
         Then follows it up with a summarizing message for the user.
+        Returns the agent's response.
+        If training flag is True, also returns the agent's intention in a dictionary as follows:
+        {'intention': [the agent's intention], 'response': [the agent's response]}
         """
         self.session = session_id
         # Main agent receives latest user message (memory auto-injects context)
         agent_result = self.main_agent.invoke({"input": user_input},config={"configurable": {"session_id": session_id}}) 
         agent_output = agent_result['output']
         agent_steps = agent_result['intermediate_steps']
+        # print(agent_steps)
         # if the agent stopped after max iterations conclude the steps and return a summary
         if "Agent stopped due to max iterations" in agent_output:
             # Log summary indications debugging
@@ -172,7 +177,8 @@ class Agent:
             })
             
             agent_output = generated_response
-        return self.outputParser.invoke(agent_output)
+        agent_response = self.outputParser.invoke(agent_output) 
+        return agent_response if training else agent_response['response']
     
     # retreive session history or logges
     def get_from_store(self,session_id, hist=True):
