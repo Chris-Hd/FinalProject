@@ -59,7 +59,7 @@ def get_agent(position=POSITION, verbose=False):
         model=model,
         ft_model=ft_model,
         base_url=base_url,
-        system_message=f"The candidate is applying for the {position} position.",
+        system_message=f"The candidate has submitted their application for the {position} position.",
         sch_tools=sch_tools,
         info_tools=info_tools,
         temperature=0,
