@@ -1,12 +1,13 @@
-import json
 from os.path import sep as path_sep
+from typing import Union
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain_classic.agents import create_openai_tools_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_classic.memory import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
-
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+from langchain_classic.output_parsers import OutputFixingParser
 
 class Agent:
 
@@ -15,8 +16,10 @@ class Agent:
         self.store = {}
         # set verbose 
         self.verbose = verbose
-        # Optional system message for all agents
+        # Optional system message for main agent
         self.system_message = system_message
+
+        self.summary_counter=0
 
         # Load the base llm
         self.llm = ChatOpenAI(
@@ -36,17 +39,26 @@ class Agent:
             temperature=temperature
         )
 
-        # Advisors store
+        # Advisors store, the advisors are set to max iterations 3, the advisors are set to max iterations 3
         self.advisors = {
-            'info': self.build_agent(self.llm,f"agents_Instructions{path_sep}info_advisor.md", tools=info_tools),
-            'schedule': self.build_agent(self.llm,f"agents_Instructions{path_sep}schedule_advisor.md", tools=sch_tools),
-            'exit': self.build_agent(self.ft_llm, f"agents_Instructions{path_sep}exit_advisor.md")
+            'info': self.build_agent(self.llm,f"agents_Instructions{path_sep}info_advisor.md", max_iterations=3, tools=info_tools),
+            'schedule': self.build_agent(self.llm,f"agents_Instructions{path_sep}schedule_advisor.md", max_iterations=3, tools=sch_tools),
+            'exit': self.build_agent(self.ft_llm, f"agents_Instructions{path_sep}exit_advisor.md", max_iterations=3)
         }
+
+        # Create a fallback chain to use in case an agent ran out of steps. with optional addition to system message if needed
+        summary_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You ran out of steps. Synthesize the best possible final answer for the user based on the partial work completed below.\n {sys_msg}"),
+            ("user", "Original request: {input}\n\nActions and observations taken so far:\n{history}")
+        ])
+
+        self.outputParser =  OutputFixingParser.from_llm(parser=JsonOutputParser(), llm=self.llm)
+        self.fallback_chain = summary_prompt | self.llm | StrOutputParser()
 
         self.session = None
 
         @tool
-        def choose_advisor(advisor: str, prompt: str = "") -> dict:
+        def choose_advisor(advisor: str, output: str = "") -> dict:
             """
             ## Advisor parameter
             Select the appropriate advisor to consult.
@@ -55,33 +67,34 @@ class Agent:
             * Schedule
             * Exit
             
-            ## Prompt parameter (Optional)
-            Could be anything from a question to an instruction, depending on the situation, that is sent to the Advisor.
+            ## Output parameter (Optional)
+            Your **Output** to the advisor.
 
             ## Returns
             This tool will return The **output** of the selected advisor.
-            The output is structured as a dicttionary.
+            The output is structured as a dictionary.
+
             If the selected advisor does not match one of the above advisors,
             the tool will return an appropriate message.
 
             ## Examples
             Example 1 Input:
-            - {'advisor':'Info'}
+            - {{"advisor":"Info"}}
 
             Example 1 Output:
-            - {"Info Advisor": "Hello! How can I help you today?"}
+            - {{"Info Advisor": "Hello! How can I help you today?"}}
 
             Example 2 Input:
-            - {'advisor':'Schedule', 'prompt': 'The user wants to schedule an interview in 2024-09-02'}
+            - {{"advisor":"Schedule", "output": "The user wants to schedule an interview in 2024-09-02"}}
 
             Example 2 Output:
-            - {"Schedule Advisor": "Certainly, I can help you with that. Here are the available Time slots available for 2024-09-02... "}
+            - {{"Schedule Advisor": "Certainly, I can help you with that. Here are the available Time slots available for 2024-09-02... "}}
 
             Example 3 Input:
-            - {'advisor':'Exit', 'prompt': "The user started talking about his troubles in life, should we end the conversation?"}
+            - {{"advisor":"Exit", "output": "The user started talking about his troubles in life, should we end the conversation?"}}
 
             Example 3 Output:
-            - {"Exit Advisor": "Sounds like the user is not interested in applying to the position anymore. You can end the conversation as follows..."}
+            - {{"Exit Advisor": "Sounds like the user is not interested in applying to the position anymore. You can end the conversation as follows..."}}
 
             """
 
@@ -89,36 +102,84 @@ class Agent:
                 if self.session is None:
                     raise Exception("Session Loading Failed")
 
-            # Retrieve full history from memory
+                    # Retrieve full history from memory
                 full_history = self.get_from_store(self.session).messages
                 # log the intention of the main agent in each step
-                self.get_from_store(self.session, hist=False).append('continue' if advisor.lower() == 'info' else advisor.lower())
-                if len(prompt) < 1:
-                    # No instructions provided
-                    full_convo = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in full_history])
-                else:
-                    full_convo = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in full_history]+[f"Main Agent: {prompt}"])
+                self.get_from_store(self.session, hist=False).append(advisor.lower())
+                session_history = "\n".join([f"{m.type.capitalize()}: {m.content}" for m in full_history])
                 # return advisor's output instead of just indication
-                advisor_output = self.advisors[advisor.lower()].invoke({"input": full_convo})["output"]
-                #return f'Advisor {advisor} has been selected. You are now outputting to the selected advisor.'
+                advisor_result = self.advisors[advisor.lower()].invoke({"history": session_history, "input": output})
+                advisor_output = advisor_result['output']
+                advisor_steps = advisor_result['intermediate_steps']
+                # if the agent stopped after max iterations, conclude the steps and return a summary
+                if "Agent stopped due to max iterations" in advisor_output:
+                    # Log summary indications debugging
+                    self.summary_counter+=1
+                    print(self.summary_counter)
+                    # Format tool calls & results for the fallback prompt
+                    history_summary = "\n".join([
+                        f"Action: {action.tool}({action.tool_input})\nResult: {result}"
+                        for action, result in advisor_steps
+                    ])
+
+                    generated_response = self.fallback_chain.invoke({
+                        "sys_msg": "",
+                        "input": session_history + (f'\nMain Agent: {output}' if len(output)>0 else ''),
+                        "history": history_summary
+                    })
+                    
+                    return {f'{advisor} Advisor': generated_response}
+                    
                 return {f'{advisor} Advisor': advisor_output}
             except KeyError:
                 return {"Error": "No such advisor found, please make sure to select from the advisors described in the tool description."}
             except Exception as e:
                 return {"Error":str(e)}
 
-        self.main_agent = self.build_agent(self.llm,f"agents_Instructions{path_sep}main_agent.md", tools=[choose_advisor],has_history=True)
+        # main agent is set to default max iterations: 5
+        self.main_agent = self.build_agent(self.llm, f"agents_Instructions{path_sep}main_agent.md", tools=[choose_advisor],has_history=True)
 
-    def step(self, session_id, user_input="") -> str:
+    def step(self, session_id, user_input="", training=False) -> Union[str,dict]:
         """
         Handles one turn of user input for the main agent (with memory),
         and if needed, passes the full memory/history to the advisor agents.
         Then follows it up with a summarizing message for the user.
+        Returns the agent's response.
+        If training flag is True, also returns the agent's intention in a dictionary as follows:
+        {'intention': [the agent's intention], 'response': [the agent's response]}
         """
         self.session = session_id
         # Main agent receives latest user message (memory auto-injects context)
-        return self.main_agent.invoke({"input": user_input},config={"configurable": {"session_id": session_id}})["output"] 
+        agent_result = self.main_agent.invoke({"input": user_input},config={"configurable": {"session_id": session_id}}) 
+        agent_output = agent_result['output']
+        agent_steps = agent_result['intermediate_steps']
+        # print(agent_steps)
+        # if the agent stopped after max iterations conclude the steps and return a summary
+        if "Agent stopped due to max iterations" in agent_output:
+            # Log summary indications debugging
+            self.summary_counter+=1
+            
+            # Format tool calls & results for the fallback prompt
+            history_summary = "\n".join([
+                f"Action: {action.tool}({action.tool_input})\nResult: {result}"
+                for action, result in agent_steps
+            ])
 
+            sys_msg = '''
+            * Return your response exactly in the following format (as a json document, *Choose* the intention **one of**: continue, schedule, end ):
+            {{"intention": "[Insert your intention regarding your response]", "response": "[Insert your response]"}}
+            '''
+            
+            generated_response = self.fallback_chain.invoke({
+                "sys_msg": sys_msg,
+                "input": user_input,
+                "history": history_summary
+            })
+            
+            agent_output = generated_response
+        agent_response = self.outputParser.invoke(agent_output) 
+        return agent_response if training else agent_response['response']
+    
     # retreive session history or logges
     def get_from_store(self,session_id, hist=True):
         if session_id not in self.store:
@@ -127,20 +188,21 @@ class Agent:
         return self.store[session_id]['int_log'] if not hist else self.store[session_id]['hist']
     
     # create the agent pipeline
-    def build_agent(self, llm, context_file, tools=[], has_history=False):
+    def build_agent(self, llm, context_file, max_iterations=5, tools=[], has_history=False):
         # load context
         with open(context_file) as f:
             context = f.read()
 
-        # handle the system message
-        context += f'\n\n##Additional Info From The App\n{self.system_message}'
+        # handle the system message for main agent only
+        if has_history:
+            context += f'\n\n##Additional Info From The App:\n{self.system_message}'
 
         # Create the messages list
         messages = [
             ("system", context),
             MessagesPlaceholder(variable_name="history"),
             MessagesPlaceholder(variable_name="agent_scratchpad"),
-            ("user", "{input}")
+            ("user", "{input}" if has_history else "Session history: {history}\n\n Main Agent Request: {input}")
         ]
 
         # remove history if not needed
@@ -152,7 +214,16 @@ class Agent:
 
         # Build agent
         agent = create_openai_tools_agent(llm, tools=tools, prompt=prompt)
-        executor = AgentExecutor(agent=agent, tools=tools, verbose=self.verbose)
+
+        agent_args = {
+            'agent':agent,
+            'tools':tools,
+            'verbose':self.verbose,
+            'max_iterations':max_iterations,
+            'early_stopping_method':'force',
+            'return_intermediate_steps': True
+        }
+        executor = AgentExecutor(**agent_args)
 
         # return with or without history
         if has_history:
@@ -164,8 +235,6 @@ class Agent:
             )
         else:
             return executor
-
-
 
 
 if __name__ == '__main__':
@@ -207,7 +276,7 @@ if __name__ == '__main__':
         api_key="ollama",
         model="gemma4:e4b", 
         base_url="http://localhost:11434/v1",
-        system_message="The User's application has been received successfully. The user will be redirected to you.",
+        system_message="The User's application has been received successfully. The User will be redirected to you.",
         sch_tools=[get_next_three_dates],
         info_tools=[load_info],
         temperature = 0,
@@ -215,9 +284,9 @@ if __name__ == '__main__':
     )
 
     # Step usage
-    a1.step("user1")
-    print(a1.get_from_store(a1.session))
-    a1.step("user1", "I've been using Python professionally for five years, mostly for ML.")
-    print(a1.get_from_store(a1.session))
+    print(a1.step("user1"))
+    # print(a1.get_from_store(a1.session))
+    print(a1.step("user1", "I've been using Python professionally for five years, mostly for ML."))
+    # print(a1.get_from_store(a1.session))
     # a1.step("user1", "I can't at that time—I'm busy.")
     # a1.step("user1", "I'm sorry, but I'm no longer interested.")
