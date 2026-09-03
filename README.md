@@ -208,7 +208,6 @@ FinalProject/
 │   ├── test_evals.ipynb
 │   ├── test_main.py
 │   └── test_schedule_db.py
-├── CFmatrix.png
 ├── CFmatrix2.png
 ├── db_Tech.sql
 ├── requirements.txt
