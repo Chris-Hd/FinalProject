@@ -133,12 +133,8 @@ python -m app.modules.embedding --pdf "Python Developer Job Description.pdf"
 ## Screenshots
 
 <p float="left">
-  <span style="display: inline-block; text-align: center; margin-right: 20px;">
-    <b>Using local Ollama Model: gemma4:e4b</b><br>
-    <img src="CFmatrix.png" width="400" alt="Confusion Matrix 1" title="Confusion Matrix 1"/>
-  </span>
   <span style="display: inline-block; text-align: center;">
-    <b>Using Openai Model: o4-mini</b><br>
+    <b>Using Openai Model: 'o4-mini'</b><br>
     <img src="CFmatrix2.png" width="400" alt="Confusion Matrix 2" title="Confusion Matrix 2"/>
   </span>
 </p>
@@ -212,7 +208,6 @@ FinalProject/
 │   ├── test_evals.ipynb
 │   ├── test_main.py
 │   └── test_schedule_db.py
-├── CFmatrix.png
 ├── CFmatrix2.png
 ├── db_Tech.sql
 ├── requirements.txt
